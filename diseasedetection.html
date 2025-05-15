@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Species Detection</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 200px;
+            background-image: url('https://images6.alphacoders.com/134/1347850.png');
+            background-size: cover;
+            background-position: center;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background-color: rgba(255, 255, 255, 0.8);
+        }
+        .btn {
+            display: inline-block;
+            width: 200px;
+            padding: 15px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #007BFF;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+            text-align: center;
+            text-decoration: none;
+        }
+        .btn:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        #preview {
+            margin-top: 20px;
+        }
+        #preview img {
+            max-width: 100%;
+            display: none;
+        }
+        video {
+            max-width: 100%;
+            margin-top: 20px;
+            border-radius: 10px;
+        }
+        canvas {
+            display: none;
+        }
+        .predicted-plant {
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 20px;
+            color: #FF5733; /* Stylish color */
+            text-transform: uppercase;
+        }
+        #responseBox {
+            background-color: #f9f9f9;
+            padding: 20px;
+            margin-top: 20px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 16px;
+            line-height: 1.6;
+            color: #333;
+        }
+        #responseBox pre {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Disease Detection</h1>
+        <p>Upload a photo or take one using your camera to detect disease.</p>
+
+        <!-- Upload Photo -->
+        <label for="uploadInput" class="btn">Upload Photo</label>
+        <input type="file" accept="image/*" id="uploadInput">
+
+        <!-- Preview Section -->
+        <div id="preview">
+            <video id="camera" autoplay playsinline style="display: none;"></video>
+            <canvas id="canvas"></canvas>
+            <img id="previewImage" src="" alt="Preview">
+        </div>
+
+        <button class="btn" id="fetchButton" style="display: none;">Fetch Description</button>
+
+        <!-- Display the predicted plant name -->
+        <div id="predictedPlant" class="predicted-plant"></div>
+
+        <!-- Display the fetched species description -->
+        <div id="responseBox">
+            <pre id="responseText"></pre>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadInput = document.getElementById('uploadInput');
+            const previewImage = document.getElementById('previewImage');
+            const camera = document.getElementById('camera');
+            const canvas = document.getElementById('canvas');
+            const captureButton = document.getElementById('captureButton');
+            const fetchButton = document.getElementById('fetchButton');
+            const responseText = document.getElementById('responseText');
+            const predictedPlant = document.getElementById('predictedPlant');
+            let stream;
+
+            // Open camera to preview
+            function openCamera() {
+                navigator.mediaDevices.getUserMedia({ video: true })
+                    .then((mediaStream) => {
+                        stream = mediaStream;
+                        camera.srcObject = stream;
+                        camera.style.display = 'block';
+                        captureButton.style.display = 'inline-block';
+                    })
+                    .catch((error) => {
+                        alert('Unable to access camera: ' + error.message);
+                    });
+            }
+
+            // Capture photo from video stream
+            function capturePhoto() {
+                const context = canvas.getContext('2d');
+                canvas.width = camera.videoWidth;
+                canvas.height = camera.videoHeight;
+                context.drawImage(camera, 0, 0, canvas.width, canvas.height);
+
+                const imageDataURL = canvas.toDataURL('image/png');
+                previewImage.src = imageDataURL;
+                previewImage.style.display = 'block';
+
+                // Stop the camera stream
+                stream.getTracks().forEach(track => track.stop());
+                camera.style.display = 'none';
+                captureButton.style.display = 'none';
+                fetchButton.style.display = 'inline-block';
+            }
+
+            // Preview uploaded image
+            function previewFile(input) {
+                const file = input.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        previewImage.src = e.target.result;
+                        previewImage.style.display = 'block';
+                        fetchButton.style.display = 'inline-block';
+                    };
+                    reader.readAsDataURL(file);
+                }
+            }
+
+            uploadInput.addEventListener('change', () => previewFile(uploadInput));
+
+            // Convert base64 to Blob
+            function dataURItoBlob(dataURI) {
+                const byteString = atob(dataURI.split(',')[1]);
+                const arrayBuffer = new ArrayBuffer(byteString.length);
+                const uintArray = new Uint8Array(arrayBuffer);
+                for (let i = 0; i < byteString.length; i++) {
+                    uintArray[i] = byteString.charCodeAt(i);
+                }
+                return new Blob([uintArray], { type: 'image/png' });
+            }
+
+            // Send image to Flask API
+            async function sendImageToFlask(imageData) {
+                try {
+                    const formData = new FormData();
+                    const blob = dataURItoBlob(imageData);
+                    formData.append('image', blob, 'image.png');
+
+                    const response = await fetch('http://127.0.0.1:5000/predict_2', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to get prediction');
+                    }
+
+                    const data = await response.json();
+                    return data.predictedClass;
+                } catch (error) {
+                    alert("Error predicting class: " + error.message);
+                }
+            }
+
+            // Fetch species description from AWS API
+            async function fetchSpeciesData(species) {
+                try {
+                    const apiUrl = `https://vm3vzbzjk5.execute-api.ap-southeast-2.amazonaws.com/test/species?class=${encodeURIComponent(species)}`;
+                    const response = await fetch(apiUrl);
+
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch species data');
+                    }
+
+                    const data = await response.json();
+                    responseText.textContent = JSON.stringify(data, null, 2);
+                } catch (error) {
+                    responseText.textContent = "Error fetching species description: " + error.message;
+                }
+            }
+
+            // Fetch predictions and display results
+            if (fetchButton) {
+                fetchButton.addEventListener('click', async () => {
+                    const predictedClass = await sendImageToFlask(previewImage.src);
+                    predictedPlant.textContent = `Predicted Plant: ${predictedClass}`;
+                    fetchSpeciesData(predictedClass);
+                });
+            }
+        });
+    </script>
+</body>
+</html>
